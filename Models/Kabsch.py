@@ -18,7 +18,7 @@ def kabsch(base, target):
     
     # Проверка деетерменанта
     if np.linalg.det(R) < 0:
-        Vt[2, :] *= -1
+        Vt[-1, :] *= -1
         R = Vt.T @ U.T
     # Вектор смещения
     t = centroid_target - R @ centroid_base
