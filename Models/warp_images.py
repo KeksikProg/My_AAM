@@ -2,13 +2,13 @@ from scipy.spatial import Delaunay
 from skimage.transform import PiecewiseAffineTransform, warp
 import numpy as np
 
-def warp_images_to_mean_shape(image_list, landmark_list, base_shape):
+def warp_images_to_mean_shape(image_list, landmark_list, base_shape, texture_size):
     mean_shape = base_shape
     warped_image_list = []
     piecewise_affine_transform = PiecewiseAffineTransform()
 
     # Фиксируем размер output — по первому изображению
-    target_shape = image_list[0].shape
+    target_shape = texture_size
 
     for aligned_image, landmarks in zip(image_list, landmark_list):
         piecewise_affine_transform.estimate(mean_shape, landmarks)
