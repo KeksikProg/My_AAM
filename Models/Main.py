@@ -9,33 +9,33 @@ from build_func import build_func
 import matplotlib.pyplot as plt
 
 
-TEXTURE_SIZE = (128, 128)#(360, 340) (128, 128) - 160 изображений 
+TEXTURE_SIZE =  (300, 300)#(360, 340) #(128, 128) - 160 изображений 
 
 if __name__ == "__main__":
     #Считывание датасет
     images, blandshapes = read_dataset_from_pts("dataset")
     print("Датасет считался")
 
-    normalized = normilize(blandshapes[:-1])
+    normalized = normilize(blandshapes[:2])
     base_shape = np.mean(normalized, axis = 0)
     bland_shapes = np.array(normalized)
     center_base_shape = center_shape(base_shape, TEXTURE_SIZE)
     print("Все нормализовалось, блендшейпы формы посчитались")
 
-    warp = warp_images_to_mean_shape(images[:-1], blandshapes, center_base_shape, TEXTURE_SIZE) # Тут нужно именно не нормированные точки, которые привязаны к фотографиям
+    warp = warp_images_to_mean_shape(images[:2], blandshapes, center_base_shape, TEXTURE_SIZE) # Тут нужно именно не нормированные точки, которые привязаны к фотографиям
     warp_vectors = np.array([img.flatten() for img in warp])
     mean_texture = np.mean(warp_vectors, axis = 0)
     appearance_deltas = warp_vectors - mean_texture
     print("Блендшейпы текстуры посчитались")
 
     # Определение целевого изображения и его точек
-    target_image = images[-1]
-    target_shapes = blandshapes[-1]
+    target_image = images[1]
+    target_shapes = blandshapes[1]
     target_texture = warp_images_to_mean_shape([target_image], [target_shapes], center_base_shape, TEXTURE_SIZE)[0]
     print("Целевое изображение определено")
     
-    triangles, pixel_triangle_ids, pixel_bary_coords = prepare_warp_data(center_base_shape, TEXTURE_SIZE)
-    func = build_func(center_base_shape, bland_shapes, mean_texture, appearance_deltas, triangles, pixel_triangle_ids, pixel_bary_coords, target_texture, target_shapes, TEXTURE_SIZE)
+    triangles, pixel_triangle_ids, pixel_bary_coords, is_valid_pixel = prepare_warp_data(center_base_shape, TEXTURE_SIZE)
+    func = build_func(center_base_shape, bland_shapes, mean_texture, appearance_deltas, triangles, pixel_triangle_ids, pixel_bary_coords, is_valid_pixel, target_texture, target_shapes, TEXTURE_SIZE)
     print("Функция построена")
 
     num_shape_params = len(bland_shapes) + 2
@@ -43,12 +43,26 @@ if __name__ == "__main__":
     init_params = np.zeros(num_shape_params + num_app_params)
     print("Параметры иницилизированы")
 
+    test_params = init_params.copy()
+    test_params[0] = 1.0  # сдвинуть один shape параметр
+    # test_result = func(test_params)
+    # print(f"Loss после маленького сдвига shape param: {test_result['loss']:.8f}")
+    
+    # test_params = init_params.copy()
+    test_params[num_shape_params] = 1.0  # сдвинуть один texture param
+    # test_result = func(test_params)
+    # print(f"Loss после маленького сдвига texture param: {test_result['loss']:.8f}")
+
+    print("Loss при shape_param = 1.0:", func(test_params + delta * 1.0)['loss'])
+    print("Loss при shape_param = 0.5:", func(test_params + delta * 0.5)['loss'])
+
     print("Пошла оптимизация")
-    final_params = optimize(func, init_params, 15)
+    final_params = optimize(func, init_params)
     print("Оптимизация закончена")
 
     print("Финальные параметры:")
-    print(final_params)
+    print(f"Параметры формы: {final_params[:num_shape_params]}\n")
+    print(f"Параметры текстуры: {final_params[num_shape_params:]}\n")
 
     num_shape_params = len(bland_shapes) + 2
     shape_params = final_params[:num_shape_params]
@@ -57,17 +71,24 @@ if __name__ == "__main__":
     reconstructed_texture = mean_texture + appearance_deltas.T @ appearance_params
     reconstructed_texture_img = reconstructed_texture.reshape(TEXTURE_SIZE)
     
-    plt.imshow(reconstructed_texture_img, cmap='gray')
-    plt.title('Восстановленная текстура')
-    plt.axis('off')
+    start_img = mean_texture + appearance_deltas.T @ init_params[num_shape_params:]
+    start_img = start_img.reshape(TEXTURE_SIZE)
+
+    fig, axs = plt.subplots(1, 3, figsize=(10, 5))
+
+    axs[0].imshow(start_img, cmap='gray')
+    axs[0].set_title('Старт формы')
+    axs[0].axis('off')
+    
+    axs[1].imshow(reconstructed_texture_img, cmap='gray')
+    axs[1].set_title('Восстановленная текстура')
+    axs[1].axis('off')
+
+    axs[2].imshow(target_texture, cmap='gray')
+    axs[2].set_title('Варовненное целевое изображение (Target)')
+    axs[2].axis('off')
+    
     plt.show()
-
-
-    plt.imshow(target_texture, cmap='gray')
-    plt.title('Варовненное целевое изображение (Target)')
-    plt.axis('off')
-    plt.show()
-
 
 '''
     #print(target_image[350][740])

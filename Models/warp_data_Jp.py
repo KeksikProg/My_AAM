@@ -9,25 +9,28 @@ def prepare_warp_data(base_shape, texture_size):
     triangles = tri.simplices
 
     grid_x, grid_y = np.meshgrid(np.arange(w), np.arange(h))
-    pixels = np.vstack([grid_x.ravel(), grid_y.ravel()]).T  # (N, 2)
+    pixels = np.vstack([grid_x.ravel(), grid_y.ravel()]).T
 
     pixel_triangle_ids = []
     pixel_bary_coords = []
+    is_valid_pixel = []
 
     for p in pixels:
         tri_id = tri.find_simplex(p)
         if tri_id == -1:
             pixel_triangle_ids.append(None)
             pixel_bary_coords.append(None)
-            continue
-        tri_pts = base_shape[triangles[tri_id]]
-        bary = barycentric_coords(tri_pts, p)
-        pixel_triangle_ids.append(tri_id)
-        pixel_bary_coords.append(bary)
+            is_valid_pixel.append(False)
+        else:
+            tri_pts = base_shape[triangles[tri_id]]
+            bary = barycentric_coords(tri_pts, p)
+            pixel_triangle_ids.append(tri_id)
+            pixel_bary_coords.append(bary)
+            is_valid_pixel.append(True)
 
-    return triangles, pixel_triangle_ids, pixel_bary_coords
+    return triangles, pixel_triangle_ids, pixel_bary_coords, np.array(is_valid_pixel)
 
-def symbolic_warp(params, base_shape, blendshapes, triangles, pixel_triangle_ids, pixel_bary_coords):
+def symbolic_warp(params, base_shape, blendshapes, triangles, pixel_triangle_ids, pixel_bary_coords, is_valid_pixel):
     num_points = base_shape.shape[0]
 
     # Базовая форма + линейная комбинация blendshapes + трансляция
@@ -43,31 +46,20 @@ def symbolic_warp(params, base_shape, blendshapes, triangles, pixel_triangle_ids
     # Теперь проходим по всем пикселям
     pixel_coords = []
 
-    for i in range(len(pixel_triangle_ids)):
+    for i, valid in enumerate(is_valid_pixel):
+        if not valid:
+            continue  # пропускаем мусорные пиксели
+    
         tri_id = pixel_triangle_ids[i]
         bary_coords = pixel_bary_coords[i]
-
-        if tri_id is None:
-            # Если пиксель вне формы — положим (0, 0)
-            pixel_coords.append(0)
-            pixel_coords.append(0)
-            continue
-
-        # Получаем индексы трёх вершин треугольника
+    
         i1, i2, i3 = triangles[tri_id]
-
-        # Берем сами вершины
-        v1 = shape[i1, :]  # (2,)
+        v1 = shape[i1, :]
         v2 = shape[i2, :]
         v3 = shape[i3, :]
-
-        # Преобразуем barycentric coords в Casadi формат
         bary = ca.DM(bary_coords)
-
-        # Линейная комбинация вершин по барицентрическим координатам
-        p = bary[0]*v1 + bary[1]*v2 + bary[2]*v3  # (2,)
-
-        # Сохраняем отдельно x и y координаты
+        p = bary[0]*v1 + bary[1]*v2 + bary[2]*v3
+    
         pixel_coords.append(p[0])
         pixel_coords.append(p[1])
 
