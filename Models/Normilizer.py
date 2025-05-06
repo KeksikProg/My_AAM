@@ -10,9 +10,3 @@ def normilize(shapes):
         normalized.append(aligned)
     return normalized
 
-def center_shape(shape, texture_size):
-    shape = shape.copy()
-    center_texture = np.array(texture_size[::-1]) / 2
-    center_shape = np.mean(shape, axis=0)
-    shift = center_texture - center_shape
-    return shape + shift

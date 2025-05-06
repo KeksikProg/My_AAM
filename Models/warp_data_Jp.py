@@ -35,20 +35,30 @@ def symbolic_warp(params, base_shape, blendshapes, triangles, pixel_triangle_ids
 
     # Базовая форма + линейная комбинация blendshapes + трансляция
     base_flat = ca.MX(base_shape.flatten())
-    deltas = [ca.MX(s.flatten()) - base_flat for s in blendshapes]
-    w = params[:-2]
+    deltas = [ca.MX(s.flatten()) for s in blendshapes]
+    w = params[:-3]           
+    theta = params[-3]
     tx, ty = params[-2], params[-1]
-    translation = ca.vertcat(*([tx, ty] * num_points))
+    #translation = ca.vertcat(*([tx, ty] * num_points))
 
-    shape_vec = base_flat + ca.mtimes(ca.horzcat(*deltas), w) + translation
-    shape = ca.reshape(shape_vec, num_points, 2)  # (num_points, 2)
+    shape_vec = base_flat + ca.mtimes(ca.horzcat(*deltas), w)
+    shape = ca.reshape(shape_vec, num_points, 2)  
 
-    # Теперь проходим по всем пикселям
+    cos_theta = ca.cos(theta)
+    sin_theta = ca.sin(theta)
+    R = ca.vertcat(
+        ca.horzcat(cos_theta, -sin_theta),
+        ca.horzcat(sin_theta,  cos_theta)
+    )
+
+    shape = (R @ shape.T).T + ca.vertcat(*([tx, ty] * num_points)).reshape((num_points, 2))
+
+    
     pixel_coords = []
 
     for i, valid in enumerate(is_valid_pixel):
         if not valid:
-            continue  # пропускаем мусорные пиксели
+            continue  
     
         tri_id = pixel_triangle_ids[i]
         bary_coords = pixel_bary_coords[i]
@@ -63,7 +73,7 @@ def symbolic_warp(params, base_shape, blendshapes, triangles, pixel_triangle_ids
         pixel_coords.append(p[0])
         pixel_coords.append(p[1])
 
-    # Вернуть все координаты как длинный вектор (2*num_pixels,)
+    
     return ca.vertcat(*pixel_coords)
 
 
