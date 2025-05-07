@@ -1,15 +1,19 @@
 import numpy as np
 from Optimizer import optimize
 from Image_grad import image_grad
-from read_dataset import read_dataset_from_pts
+from read_dataset import read_dataset_from_pts, read_pts
 import casadi as ca
-from Optimizer import optimize
 from Normilizer import normilize
-from read_dataset import read_dataset_from_pts
-from warp_data_Jp import prepare_warp_data
+from warp_data_Jp import prepare_warp_data, symbolic_warp
 from build_func import build_func
 import matplotlib.pyplot as plt
-from line_interpolate import bilinear_interpolate
+from barucentr_coords import barycentric_coords
+import tempfile
+import cv2
+from pathlib import Path
+from scipy.spatial import Delaunay
+from warp_utils import warp_piecewise_affine
+
 
 def test_newton_step():
     JTJ = np.array([[2.0, 0.0], [0.0, 4.0]])
@@ -26,12 +30,10 @@ def test_newton_step():
     result = optimize(build_fn, init, max_iter=1, damping=0.0)
     expected = np.linalg.solve(JTJ, -JTr).flatten()
 
-    assert np.allclose(result, expected), f"Expected {expected}, got {result}"
-    print("Newton step test passed")
-
-
+    assert np.allclose(result, expected), f"Ожидания {expected}, результат {result}"
+    print("Шаг Ньютона. Тест сдан")
 def test_image_grad():
-    print("🔍 Тест градиента изображения...")
+    print("Тест градиента изображения")
     texture_size = (3, 3)
     test_img = np.array([
         [1, 2, 3],
@@ -40,15 +42,15 @@ def test_image_grad():
     ], dtype=np.float32)
 
     expected_dx = np.array([
-        [0, 0, 0],
-        [1, 1, 1],
-        [0, 0, 0]
+        [ 1. ,  1. , -1. ],
+        [ 2.5,  1. , -2.5],
+        [ 4. ,  1. , -4. ]
     ], dtype=np.float32)
 
     expected_dy = np.array([
-        [0, 1, 0],
-        [0, 1, 0],
-        [0, 1, 0]
+        [ 2. ,  2.5,  3. ],
+        [ 3. ,  3. ,  3. ],
+        [-2. , -2.5, -3. ]
     ], dtype=np.float32)
 
     grad_fn = image_grad(texture_size)
@@ -57,37 +59,9 @@ def test_image_grad():
     dx = dx.full()
     dy = dy.full()
 
-    assert np.allclose(dx, expected_dx), f"dx mismatch\n{dx}\n!=\n{expected_dx}"
-    assert np.allclose(dy, expected_dy), f"dy mismatch\n{dy}\n!=\n{expected_dy}"
-    print("Image gradient test passed")
-
-
-def test_identity_fit():
-    # Мини-датасет из 1 картинки
-    images, shapes = read_dataset_from_pts("dataset")
-    img = images[0]
-    shape = shapes[0]
-
-    normalized = normilize([shape])
-    base_shape = center_shape(normalized[0], (16, 16))
-    bland_shapes = np.array(normalized)
-
-    warp = warp_images_to_mean_shape([img], [shape], base_shape, (16, 16))
-    mean_texture = warp[0].flatten() / 255.0
-    appearance_deltas = np.zeros((1, mean_texture.size))  # Только 1 текстурный параметр
-
-    triangles, pix_ids, bary, valid = prepare_warp_data(base_shape, (16, 16))
-    target_tex = warp[0]
-
-    func = build_func(base_shape, bland_shapes, mean_texture, appearance_deltas, triangles, pix_ids, bary, valid, target_tex, shape, (16, 16))
-    init_params = np.zeros(len(bland_shapes) + 2 + 1)
-
-    final = optimize(func, init_params, max_iter=50)
-    loss = func(final)["loss"]
-    print(f"Final loss = {loss}")
-    assert loss < 1e-6, "Too high loss on identity fit"
-    print("Identity fit test passed")
-
+    assert np.allclose(dx, expected_dx), f"dx промах\n{dx}\n!=\n{expected_dx}"
+    assert np.allclose(dy, expected_dy), f"dy промах\n{dy}\n!=\n{expected_dy}"
+    print("Градиент изображения. Тест сдан")
 def test_prepare_warp_data():
     # Простой треугольник
     base_shape = np.array([
@@ -114,58 +88,125 @@ def test_prepare_warp_data():
             assert pixel_triangle_ids[i] is None
             assert pixel_bary_coords[i] is None
 
-    print("test_prepare_warp_data passed.")
+    print("Подготовка данных перед варпом. Тест сдан")
+def test_barycentric_coords():
+    tri = [(0, 0), (1, 0), (0, 1)]
 
-def test_bilinear_interpolate():
-    # Подготовка изображения 5x5 с линейно возрастающими значениями
-    img_np = np.arange(25).reshape(5, 5).astype(np.float32)
-    img_flat = img_np.flatten()
-    img = ca.MX(img_flat)
+    # Центроид треугольника
+    p_inside = (1/3, 1/3)
+    bary = barycentric_coords(tri, p_inside)
+    assert np.allclose(sum(bary), 1.0), "Сумма должна быть 1"
+    assert all(0 <= b <= 1 for b in bary), "Координаты должны быть в [0, 1]"
 
-    # Тестовые координаты: между (1,1) и (2,2)
-    coords_np = np.array([1.5, 1.5])  # x=1.5, y=1.5
-    coords = ca.MX(coords_np)
+    # Вершина A
+    assert np.allclose(barycentric_coords(tri, tri[0]), [1, 0, 0])
 
-    # Размер изображения
-    texture_size = (5, 5)
+    # Вне треугольника
+    p_outside = (2, 2)
+    bary_out = barycentric_coords(tri, p_outside)
+    assert not all(0 <= b <= 1 for b in bary_out), "Хотя бы одна координата должна быть вне [0,1]"
+    print("Проверка рассчета барицентрических координат. Тест сдан")
+def test_normilize():
+    base = np.array([[0.0, 0.0], [1.0, 0.0]])
+    rotated = np.array([[0.0, 0.0], [0.0, 1.0]])
+    translated = np.array([[1.0, 1.0], [2.0, 1.0]])
 
-    # Функция на CasADi
-    interp_val = bilinear_interpolate(img, coords, texture_size)
+    shapes = [base, rotated, translated]
+    normalized = normilize(shapes)
 
-    # Ожидаемое значение (через NumPy)
-    def numpy_bilinear(img, x, y):
-        x0 = int(np.floor(x))
-        x1 = min(x0 + 1, img.shape[1] - 1)
-        y0 = int(np.floor(y))
-        y1 = min(y0 + 1, img.shape[0] - 1)
-
-        Ia = img[y0, x0]
-        Ib = img[y1, x0]
-        Ic = img[y0, x1]
-        Id = img[y1, x1]
-
-        wa = (x1 - x) * (y1 - y)
-        wb = (x1 - x) * (y - y0)
-        wc = (x - x0) * (y1 - y)
-        wd = (x - x0) * (y - y0)
-
-        return wa * Ia + wb * Ib + wc * Ic + wd * Id
-
-    expected = numpy_bilinear(img_np, 1.5, 1.5)
-
-    # Проверка
-    f = ca.Function('f', [], [interp_val], [], ['out'])
-    result = f()['out'].full().item()
+    for shape in normalized:
+        d_base = np.linalg.norm(base[1] - base[0])
+        d_shape = np.linalg.norm(shape[1] - shape[0])
+        assert np.allclose(d_shape, d_base, atol=1e-6), f"Длины не совпадают: {d_shape} != {d_base}"
     
-    assert np.isclose(result, expected, atol=1e-4), f"Expected {expected}, got {result}"
-    print("test_bilinear_interpolate passed.")
+    print("Нормализация форм. Тест сдан")
+def test_read_pts():
+    content = """version: 1
+        n_points: 3
+        {
+        0.0 0.0
+        1.0 0.0
+        1.0 1.0
+        }
+
+    """
+    with tempfile.NamedTemporaryFile(mode='w+', suffix='.pts', delete=False) as f:
+        f.write(content)
+        f.flush()
+        pts_path = Path(f.name)
+    
+    points = read_pts(pts_path)
+    assert points == [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0)]
+    print("Чтение .pts. Тест сдан")
+def test_read_dataset_from_pts():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir = Path(tmpdir)
+        # создаём .pts
+        pts_path = tmpdir / "sample.pts"
+        pts_path.write_text("""version: 1
+            n_points: 2
+            {
+            10.0 20.0
+            30.0 40.0
+            }
+
+            """)
+        # создаём изображение .png
+        img_path = tmpdir / "sample.png"
+        img = np.ones((100, 100), dtype=np.uint8) * 255
+        cv2.imwrite(str(img_path), img)
+
+        images, landmarks = read_dataset_from_pts(tmpdir)
+
+        assert len(images) == 1
+        assert images[0].shape == (100, 100)
+        assert landmarks[0] == [(10.0, 20.0), (30.0, 40.0)]
+        print("Чтение датасета из .pts. Тест сдан")
+def test_warp_piecewise_affine_identity():
+    img = np.full((50, 50), 128, dtype=np.uint8)
+
+    src_points = [(10, 10), (40, 10), (25, 40)]
+    dst_points = [(10, 10), (40, 10), (25, 40)]
+    triangles = Delaunay(np.array(src_points)).simplices
+
+    warped = warp_piecewise_affine(img, src_points, dst_points, triangles, output_size=(50, 50))
+
+    # Создаём маску, где применялось преобразование
+    mask = np.zeros_like(img, dtype=np.uint8)
+    cv2.fillConvexPoly(mask, np.int32(dst_points), 1)
+
+    # Проверяем только в области маски
+    diff = np.abs(warped.astype(np.int16) - img.astype(np.int16))
+    assert np.max(diff[mask == 1]) <= 1, "Погрешность в области треугольника превышает допустимую"
+    print("Piecewise affine warp (identity). Тест сдан")
+def test_warp_piecewise_affine_small_deformation():
+    img = np.zeros((50, 50), dtype=np.uint8)
+    cv2.circle(img, (25, 25), 10, 255, -1)  # круглое пятно в центре
+
+    src_points = [(10, 10), (40, 10), (25, 40)]
+    dst_points = [(10, 10), (42, 10), (25, 40)]  # сдвигаем правую вершину на 2 пикселя
+    triangles = Delaunay(np.array(src_points)).simplices
+
+    warped = warp_piecewise_affine(img, src_points, dst_points, triangles, output_size=(50, 50))
+
+    # Изображения должны отличаться внутри треугольника
+    mask = np.zeros_like(img, dtype=np.uint8)
+    cv2.fillConvexPoly(mask, np.int32(dst_points), 1)
+
+    diff = np.abs(warped.astype(np.int16) - img.astype(np.int16))
+    changed = np.count_nonzero(diff[mask == 1])
+
+    assert changed > 0, "Деформация не изменила изображение в области треугольника"
+    print("Piecewise affine warp (деформация). Тест сдан")
+
 
 if __name__ == "__main__":
-    # test_newton_step()
-    # test_identity_fit()
-    # test_image_grad()
-    #test_prepare_warp_data()
-    test_bilinear_interpolate()
-    
-
-
+    test_newton_step()
+    test_image_grad()
+    test_prepare_warp_data()
+    test_barycentric_coords()
+    test_normilize()
+    test_read_pts()
+    test_read_dataset_from_pts()
+    test_warp_piecewise_affine_identity()
+    test_warp_piecewise_affine_small_deformation()

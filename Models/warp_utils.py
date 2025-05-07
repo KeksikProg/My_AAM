@@ -43,30 +43,3 @@ def warp_piecewise_affine(image, src_points, dst_points, triangles, output_size)
         warped_image[y:y+rh, x:x+rw] += warped_crop * mask
 
     return np.clip(warped_image, 0, 255).astype(np.uint8)
-
-
-
-# def warp_piecewise_affine(image, src_points, dst_points, triangles, output_size):
-#     h, w = output_size[1], output_size[0]
-#     warped_image = np.zeros((h, w), dtype=np.float32)
-
-#     for tri_indices in triangles:
-#         src_tri = np.float32([src_points[i] for i in tri_indices])
-#         dst_tri = np.float32([dst_points[i] for i in tri_indices])
-
-#         r = cv2.boundingRect(dst_tri)
-#         x, y, rw, rh = r
-
-#         mask = np.zeros((rh, rw), dtype=np.float32)
-#         cv2.fillConvexPoly(mask, np.int32(dst_tri - [x, y]), 1.0, 16, 0)
-
-#         warp_mat = cv2.getAffineTransform(src_tri, dst_tri)
-#         warped = cv2.warpAffine(image.astype(np.float32), warp_mat, (w, h), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT_101)
-
-#         warped_crop = warped[y:y+rh, x:x+rw]
-#         warped_image[y:y+rh, x:x+rw] *= (1 - mask)
-#         warped_image[y:y+rh, x:x+rw] += warped_crop * mask
-
-#     return np.clip(warped_image, 0, 255).astype(np.uint8)
-
-

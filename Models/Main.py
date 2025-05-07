@@ -20,14 +20,16 @@ def visualize_landmarks(image, landmarks, title=None):
     plt.show()
 
 
-TEXTURE_SIZE =  (128, 128) #(350, 350) 
-SIZE_DATASET = 190
+TEXTURE_SIZE =  (350, 350) #(350, 350) 
+SIZE_DATASET = 30
 
 
 if __name__ == "__main__":
     #Считывание датасет
     images, shapes = read_dataset_from_pts("dataset")
     print("Датасет считался")
+
+    #visualize_landmarks(images[6], shapes[6])
 
     # Нормализация форм, построение средней формы
     normalized_shapes = normilize(shapes[:SIZE_DATASET])
@@ -63,8 +65,8 @@ if __name__ == "__main__":
     # plt.show()
 
     # Определение целевого изображения и его точек
-    target_image = images[SIZE_DATASET + 3]
-    target_shapes = shapes[SIZE_DATASET + 3]
+    target_image = images[SIZE_DATASET+1]
+    target_shapes = shapes[SIZE_DATASET+1]
     target_texture = warp_piecewise_affine(target_image, target_shapes, base_shape, triangles, TEXTURE_SIZE)
     target_texture = (target_texture.astype(np.float32) / 255.0).flatten()
     print("Целевое изображение определено")
@@ -76,6 +78,13 @@ if __name__ == "__main__":
     # Все что выше я проверил уже
     ###---###
 
+    valid_bary_coords = [pixel_bary_coords[i] for i, valid in enumerate(is_valid_pixel) if valid]
+    pixel_bary_coords = np.array(valid_bary_coords, dtype=np.float64)  # [N, 3]
+    valid_triangle_ids = [pixel_triangle_ids[i] for i, valid in enumerate(is_valid_pixel) if valid]
+    pixel_triangle_ids = np.array(valid_triangle_ids, dtype=np.int32)
+
+
+
     func = build_func(base_shape, bland_shapes_delt, mean_texture, appearance_deltas, triangles, pixel_triangle_ids, pixel_bary_coords, is_valid_pixel, target_texture, target_shapes, TEXTURE_SIZE)
     print("Функция построена")
 
@@ -86,7 +95,7 @@ if __name__ == "__main__":
 
 
     print("Пошла оптимизация")
-    final_params = optimize(func, init_params, 15)
+    final_params = optimize(func, init_params, 5)
     print("Оптимизация закончена")
 
     print("Финальные параметры:\n")
@@ -106,10 +115,6 @@ if __name__ == "__main__":
     start_img = start_img.reshape(TEXTURE_SIZE)
 
     fig, axs = plt.subplots(1, 3, figsize=(10, 5))
-
-    # print(f"start_img: min={start_img.min()}, max={start_img.max()}")
-    # print(f"reconstructed_texture: min={reconstructed_texture.min()}, max={reconstructed_texture.max()}")
-    # print(f"target_texture: min={target_texture.min()}, max={target_texture.max()}")
 
     axs[0].imshow(start_img, cmap='gray')
     axs[0].set_title('Старт формы')

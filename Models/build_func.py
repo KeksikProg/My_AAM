@@ -9,12 +9,26 @@ def build_func(base_shape, bland_shapes, mean_texture, appearance_deltas,
                target_texture, target_shape, TEXTURE_SIZE):
 
     grad_fn = image_grad(TEXTURE_SIZE)
-    dx, dy = grad_fn(mean_texture.reshape(TEXTURE_SIZE))
-    dx = dx.full().flatten()[is_valid_pixel]
-    dy = dy.full().flatten()[is_valid_pixel]
+    mean_tex_sym = ca.MX.sym("mean_tex", TEXTURE_SIZE[0] * TEXTURE_SIZE[1])
+    dx_sym, dy_sym = grad_fn(mean_tex_sym.reshape(TEXTURE_SIZE))
+    
+    # Преобразуем в вектор
+    dx_flat = dx_sym.reshape((-1, 1))
+    dy_flat = dy_sym.reshape((-1, 1))
+    
+    # Индексы валидных пикселей
+    valid_ids = np.where(is_valid_pixel.flatten())[0]
+    
+    # Выбираем только валидные элементы
+    dx_valid = ca.vertcat(*[dx_flat[i] for i in valid_ids])
+    dy_valid = ca.vertcat(*[dy_flat[i] for i in valid_ids])
 
-    dx_dm = ca.MX(dx)
-    dy_dm = ca.MX(dy)
+    # dx, dy = grad_fn(mean_texture.reshape(TEXTURE_SIZE))
+    # dx = dx.full().flatten()[is_valid_pixel]
+    # dy = dy.full().flatten()[is_valid_pixel]
+
+    # dx_dm = ca.MX(dx)
+    # dy_dm = ca.MX(dy)
 
     # Константы
     mean_texture_filtered = mean_texture[is_valid_pixel]
@@ -45,7 +59,7 @@ def build_func(base_shape, bland_shapes, mean_texture, appearance_deltas,
     dW_x = dW_dp_sym[::2, :]
     dW_y = dW_dp_sym[1::2, :]
 
-    J_p_sym = ca.diag(dx_dm) @ dW_x + ca.diag(dy_dm) @ dW_y
+    J_p_sym = ca.diag(dx_valid) @ dW_x + ca.diag(dy_valid) @ dW_y
     J_c_sym = ca.jacobian(model_texture, app_params_sym)
     J_sym = ca.horzcat(J_p_sym, J_c_sym)
 
@@ -53,15 +67,17 @@ def build_func(base_shape, bland_shapes, mean_texture, appearance_deltas,
     JTr_sym = J_sym.T @ residuals_sym
     loss_sym = ca.dot(residuals_sym, residuals_sym) / residuals_sym.shape[0]
 
-    JTJ_fn = ca.Function('JTJ_fn', [all_params], [JTJ_sym])
-    JTr_fn = ca.Function('JTr_fn', [all_params], [JTr_sym])
-    loss_fn = ca.Function('loss_fn', [all_params], [loss_sym])
+    JTJ_fn = ca.Function('JTJ_fn', [all_params, mean_tex_sym], [JTJ_sym])
+    JTr_fn = ca.Function('JTr_fn', [all_params, mean_tex_sym], [JTr_sym])
+    loss_fn = ca.Function('loss_fn', [all_params, mean_tex_sym], [loss_sym])
+
 
     def builder(current_params):
         return {
-            "JTJ": JTJ_fn(current_params).full(),
-            "JTr": JTr_fn(current_params).full(),
-            "loss": float(loss_fn(current_params))
+            "JTJ": JTJ_fn(current_params, mean_texture.flatten()).full(),
+            "JTr": JTr_fn(current_params, mean_texture.flatten()).full(),
+            "loss": float(loss_fn(current_params, mean_texture.flatten()))
         }
+
 
     return builder

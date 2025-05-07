@@ -9,12 +9,13 @@ def optimize(build_fn, init_params, max_iter=100, damping=1):
         JTr_val = funcs["JTr"]
         loss_val = funcs["loss"]
 
+        print(f"Итерация {i}, ошибка: {loss_val:.8f}")
         print(f"||JTr|| = {np.linalg.norm(JTr_val):.8f}")
         damping = 1e-6 * np.linalg.norm(JTr_val)
         delta = -np.linalg.solve(JTJ_val + damping * np.eye(JTJ_val.shape[0]), JTr_val)
         params += delta.flatten()
 
-        print(f"Итерация {i}, ошибка: {loss_val:.8f}")
+        
 
         if loss_val < 1e-6:
             break

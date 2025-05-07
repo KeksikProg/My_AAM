@@ -33,16 +33,14 @@ def prepare_warp_data(base_shape, texture_size):
 def symbolic_warp(params, base_shape, blendshapes, triangles, pixel_triangle_ids, pixel_bary_coords, is_valid_pixel):
     num_points = base_shape.shape[0]
 
-    # Базовая форма + линейная комбинация blendshapes + трансляция
     base_flat = ca.MX(base_shape.flatten())
     deltas = [ca.MX(s.flatten()) for s in blendshapes]
     w = params[:-3]           
     theta = params[-3]
     tx, ty = params[-2], params[-1]
-    #translation = ca.vertcat(*([tx, ty] * num_points))
 
     shape_vec = base_flat + ca.mtimes(ca.horzcat(*deltas), w)
-    shape = ca.reshape(shape_vec, num_points, 2)  
+    shape = ca.reshape(shape_vec, num_points, 2)
 
     cos_theta = ca.cos(theta)
     sin_theta = ca.sin(theta)
@@ -53,28 +51,19 @@ def symbolic_warp(params, base_shape, blendshapes, triangles, pixel_triangle_ids
 
     shape = (R @ shape.T).T + ca.vertcat(*([tx, ty] * num_points)).reshape((num_points, 2))
 
+    bary_coords = ca.MX(pixel_bary_coords)
+    tri_ids = ca.DM(pixel_triangle_ids).T.full().astype(int).flatten()
+    i1 = triangles[tri_ids, 0]
+    i2 = triangles[tri_ids, 1]
+    i3 = triangles[tri_ids, 2]
     
-    pixel_coords = []
-
-    for i, valid in enumerate(is_valid_pixel):
-        if not valid:
-            continue  
-    
-        tri_id = pixel_triangle_ids[i]
-        bary_coords = pixel_bary_coords[i]
-    
-        i1, i2, i3 = triangles[tri_id]
-        v1 = shape[i1, :]
-        v2 = shape[i2, :]
-        v3 = shape[i3, :]
-        bary = ca.DM(bary_coords)
-        p = bary[0]*v1 + bary[1]*v2 + bary[2]*v3
-    
-        pixel_coords.append(p[0])
-        pixel_coords.append(p[1])
-
-    
-    return ca.vertcat(*pixel_coords)
+    v1 = shape[i1, :]
+    v2 = shape[i2, :]
+    v3 = shape[i3, :]
 
 
+    coords = (bary_coords[:, 0] @ ca.DM.ones(1, 2)) * v1 + \
+         (bary_coords[:, 1] @ ca.DM.ones(1, 2)) * v2 + \
+         (bary_coords[:, 2] @ ca.DM.ones(1, 2)) * v3
 
+    return ca.reshape(coords, -1, 1)

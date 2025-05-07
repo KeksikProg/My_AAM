@@ -3,16 +3,16 @@ import cv2
 from pathlib import Path
 
 def read_pts(pts_path):
-    """Чтение .pts файла (в формате 'version: 1\nn_points: XX\n{ x y\n... }')"""
     with open(pts_path, 'r') as f:
         lines = f.readlines()
-    start = lines.index('{\n') + 1
-    end = lines.index('}\n')
+    start = next(i for i, line in enumerate(lines) if line.strip() == '{') + 1
+    end = next(i for i, line in enumerate(lines) if line.strip() == '}')
     points = []
     for line in lines[start:end]:
         x, y = map(float, line.strip().split())
         points.append((x, y))
     return points
+
 
 def read_dataset_from_pts(image_folder):
     image_folder = Path(image_folder)
