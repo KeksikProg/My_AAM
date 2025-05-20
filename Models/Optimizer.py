@@ -15,8 +15,6 @@ def optimize(build_fn, init_params, max_iter=100, damping=1):
         delta = -np.linalg.solve(JTJ_val + damping * np.eye(JTJ_val.shape[0]), JTr_val)
         params += delta.flatten()
 
-        
-
         if loss_val < 1e-6:
             break
 

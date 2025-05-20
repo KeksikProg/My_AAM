@@ -24,4 +24,4 @@ def extract_frames(video_path, output_dir, every_n=1):
     print(f"Готово. Сохранено {saved_idx} кадров в {output_dir}")
 
 # Пример использования:
-extract_frames("video_cut.mp4", "dataset", every_n=1)  # каждый 5-й кадр
+extract_frames("d.mp4", "dataset", every_n=3)  # каждый 5-й кадр
